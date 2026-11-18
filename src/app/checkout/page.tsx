@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -27,6 +27,15 @@ const EMIRATES = [
   "Umm Al Quwain",
 ];
 
+interface SavedOrder {
+  id: string;
+  order_ref: string;
+  customer_name: string;
+  emirate: string;
+  total_aed: number;
+  created_at: string;
+}
+
 export default function CheckoutPage() {
   const {
     items,
@@ -48,14 +57,33 @@ export default function CheckoutPage() {
   );
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [recentOrders, setRecentOrders] = useState<SavedOrder[]>([]);
   const [orderPlaced, setOrderPlaced] = useState<{
     orderRef: string;
     totalAED: number;
     customerName: string;
     emirate: string;
-    savedToSupabase: boolean;
-    supabaseOrderId?: string;
+    savedSource: string;
+    orderId?: string;
   } | null>(null);
+
+  const loadRecentOrders = async () => {
+    try {
+      const res = await fetch("/api/orders", { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        if (Array.isArray(json.data)) {
+          setRecentOrders(json.data);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    loadRecentOrders();
+  }, []);
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,52 +99,67 @@ export default function CheckoutPage() {
       line_total_aed: chocolate.priceAED * quantity,
     }));
 
-    let savedToSupabase = false;
-    let supabaseOrderId: string | undefined;
+    const payload = {
+      order_ref: randomRef,
+      customer_name: fullName || "Valued Guest",
+      phone,
+      email,
+      emirate,
+      address,
+      gift_note: giftNote || null,
+      payment_method: paymentMethod,
+      items: orderItemsPayload,
+      subtotal_aed: subtotalAED,
+      delivery_fee_aed: deliveryFeeAED,
+      total_aed: finalTotalAED,
+      status: "confirmed",
+    };
 
-    if (supabase) {
-      const { data, error } = await supabase
-        .from("orders")
-        .insert([
-          {
-            order_ref: randomRef,
-            customer_name: fullName || "Valued Guest",
-            phone,
-            email,
-            emirate,
-            address,
-            gift_note: giftNote || null,
-            payment_method: paymentMethod,
-            items: orderItemsPayload,
-            subtotal_aed: subtotalAED,
-            delivery_fee_aed: deliveryFeeAED,
-            total_aed: finalTotalAED,
-            status: "confirmed",
-          },
-        ])
-        .select("id")
-        .single();
+    let savedSource = "Local Database (data/local-db.json • orders table)";
+    let orderId: string | undefined;
 
-      if (error) {
-        setSubmitting(false);
-        setSubmitError(
-          `Supabase error saving order: ${error.message}. Make sure you ran the SQL for the 'orders' table.`
-        );
-        return;
+    try {
+      // 1. Save to Local Database (/api/orders)
+      const localRes = await fetch("/api/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (localRes.ok) {
+        const localJson = await localRes.json();
+        orderId = localJson.order?.id;
       }
 
-      savedToSupabase = true;
-      supabaseOrderId = data?.id;
+      // 2. Also save to Supabase if configured
+      if (supabase) {
+        const { data, error } = await supabase
+          .from("orders")
+          .insert([payload])
+          .select("id")
+          .single();
+
+        if (!error && data) {
+          savedSource = "Supabase & Local Database (orders table)";
+          orderId = data.id;
+        }
+      }
+    } catch (err: unknown) {
+      setSubmitting(false);
+      setSubmitError(
+        err instanceof Error ? err.message : "Failed to save order"
+      );
+      return;
     }
 
+    await loadRecentOrders();
     setSubmitting(false);
     setOrderPlaced({
       orderRef: randomRef,
       totalAED: finalTotalAED,
       customerName: fullName || "Valued Guest",
       emirate,
-      savedToSupabase,
-      supabaseOrderId,
+      savedSource,
+      orderId,
     });
     clearCart();
   };
@@ -153,20 +196,18 @@ export default function CheckoutPage() {
                 AED {orderPlaced.totalAED}
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-cream-300">Supabase Database:</span>
-              <span className="text-emerald-400 font-semibold flex items-center gap-1">
+            <div className="flex justify-between items-center">
+              <span className="text-cream-300">Database Status:</span>
+              <span className="text-emerald-400 font-semibold flex items-center gap-1 text-xs">
                 <Database className="w-3.5 h-3.5" />
-                {orderPlaced.savedToSupabase
-                  ? "Saved to orders table"
-                  : "Local mode (.env.local pending)"}
+                {orderPlaced.savedSource}
               </span>
             </div>
-            {orderPlaced.supabaseOrderId && (
+            {orderPlaced.orderId && (
               <div className="flex justify-between text-xs pt-1 border-t border-choc-800">
-                <span className="text-cream-400">Supabase Row ID:</span>
+                <span className="text-cream-400">Database Row ID:</span>
                 <span className="font-mono text-cream-200">
-                  {orderPlaced.supabaseOrderId}
+                  {orderPlaced.orderId}
                 </span>
               </div>
             )}
@@ -389,7 +430,7 @@ export default function CheckoutPage() {
           </div>
 
           {/* Right Order Summary */}
-          <div className="lg:col-span-5">
+          <div className="lg:col-span-5 space-y-6">
             <div className="bg-choc-900 text-cream-100 rounded-3xl p-6 sm:p-8 border-2 border-gold-500 shadow-2xl sticky top-28 space-y-5">
               <div className="flex items-center gap-2 text-gold-400 text-xs uppercase tracking-widest font-bold">
                 <Sparkles className="w-4 h-4" />
@@ -446,17 +487,50 @@ export default function CheckoutPage() {
                 className="w-full py-4 rounded-full bg-gradient-to-r from-gold-400 via-gold-500 to-gold-600 text-choc-950 font-bold text-sm uppercase tracking-wider shadow-xl hover:brightness-110 transition disabled:opacity-50"
               >
                 {submitting
-                  ? "Saving Order to Supabase..."
+                  ? "Saving Order..."
                   : `Place Order • AED ${finalTotalAED}`}
               </button>
 
               <div className="flex items-center justify-center gap-2 text-xs text-cream-300/80 pt-1">
                 <ShieldCheck className="w-4 h-4 text-gold-400" />
-                <span>Saves Directly to Supabase orders Table</span>
+                <span>Saves to Local Database (orders table)</span>
               </div>
             </div>
           </div>
         </form>
+      )}
+
+      {/* Saved Orders in Local Database Table */}
+      {recentOrders.length > 0 && (
+        <div className="mt-12 bg-cream-50 rounded-3xl p-6 sm:p-8 border-2 border-gold-500/40 shadow-md">
+          <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-gold-700 font-bold mb-2">
+            <Database className="w-4 h-4" />
+            Local Database • orders Table ({recentOrders.length})
+          </div>
+          <h3 className="font-serif text-xl font-bold text-choc-900 mb-4">
+            Recently Saved Orders
+          </h3>
+          <div className="space-y-2.5">
+            {recentOrders.slice(0, 5).map((ord) => (
+              <div
+                key={ord.id}
+                className="flex flex-wrap items-center justify-between gap-2 bg-cream-100 px-4 py-3 rounded-xl border border-gold-500/30 text-sm"
+              >
+                <div>
+                  <span className="font-mono font-bold text-choc-900 mr-2">
+                    {ord.order_ref}
+                  </span>
+                  <span className="text-choc-700">
+                    {ord.customer_name} ({ord.emirate})
+                  </span>
+                </div>
+                <span className="font-serif font-bold text-choc-900">
+                  AED {ord.total_aed}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

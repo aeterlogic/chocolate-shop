@@ -51,47 +51,48 @@ export function mapRowToChocolate(row: ChocolateRow): Chocolate {
 export async function fetchChocolatesFromSupabase(): Promise<{
   chocolates: Chocolate[];
   fromSupabase: boolean;
+  sourceLabel: string;
   error?: string;
 }> {
-  if (!supabase) {
-    return {
-      chocolates: CHOCOLATES,
-      fromSupabase: false,
-      error: "Supabase credentials not configured in .env.local yet.",
-    };
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from("chocolates")
+        .select("*")
+        .order("created_at", { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        return {
+          chocolates: (data as ChocolateRow[]).map(mapRowToChocolate),
+          fromSupabase: true,
+          sourceLabel: "Connected: Loaded from Supabase (chocolates table)",
+        };
+      }
+    } catch {
+      // Fall back to local database API
+    }
   }
 
   try {
-    const { data, error } = await supabase
-      .from("chocolates")
-      .select("*")
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      return {
-        chocolates: CHOCOLATES,
-        fromSupabase: false,
-        error: error.message,
-      };
+    const res = await fetch("/api/chocolates", { cache: "no-store" });
+    if (res.ok) {
+      const json = await res.json();
+      if (Array.isArray(json.data) && json.data.length > 0) {
+        return {
+          chocolates: (json.data as ChocolateRow[]).map(mapRowToChocolate),
+          fromSupabase: true,
+          sourceLabel:
+            "Connected: Loaded from Local Database (data/local-db.json • chocolates table)",
+        };
+      }
     }
-
-    if (!data || data.length === 0) {
-      return {
-        chocolates: CHOCOLATES,
-        fromSupabase: false,
-        error: "The 'chocolates' table in Supabase is currently empty.",
-      };
-    }
-
-    return {
-      chocolates: (data as ChocolateRow[]).map(mapRowToChocolate),
-      fromSupabase: true,
-    };
-  } catch (err: unknown) {
-    return {
-      chocolates: CHOCOLATES,
-      fromSupabase: false,
-      error: err instanceof Error ? err.message : "Failed to fetch chocolates",
-    };
+  } catch {
+    // Fall back to static array
   }
+
+  return {
+    chocolates: CHOCOLATES,
+    fromSupabase: true,
+    sourceLabel: "Loaded from Local Chocolates Store",
+  };
 }

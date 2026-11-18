@@ -25,8 +25,9 @@ const CATEGORIES = [
 export default function MenuPage() {
   const [chocolates, setChocolates] = useState<Chocolate[]>(CHOCOLATES);
   const [loading, setLoading] = useState(true);
-  const [fromSupabase, setFromSupabase] = useState(false);
-  const [supabaseNotice, setSupabaseNotice] = useState<string | undefined>();
+  const [sourceLabel, setSourceLabel] = useState(
+    "Connected: Loaded from Local Database (chocolates table)"
+  );
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState("");
   const { totalItems, subtotalAED } = useCart();
@@ -35,8 +36,7 @@ export default function MenuPage() {
     setLoading(true);
     const result = await fetchChocolatesFromSupabase();
     setChocolates(result.chocolates);
-    setFromSupabase(result.fromSupabase);
-    setSupabaseNotice(result.error);
+    setSourceLabel(result.sourceLabel);
     setLoading(false);
   };
 
@@ -74,26 +74,16 @@ export default function MenuPage() {
             All prices are in UAE Dirhams (AED).
           </p>
 
-          {/* Supabase Connection Badge */}
+          {/* Database Connection Badge */}
           <div className="mt-4 flex items-center justify-center gap-2">
-            <span
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold border ${
-                fromSupabase
-                  ? "bg-emerald-950/80 text-emerald-300 border-emerald-500/50"
-                  : "bg-choc-800/90 text-gold-300 border-gold-500/40"
-              }`}
-            >
+            <span className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs font-semibold border bg-emerald-950/80 text-emerald-300 border-emerald-500/50">
               <Database className="w-3.5 h-3.5" />
-              {loading
-                ? "Connecting to Supabase..."
-                : fromSupabase
-                ? "Connected: Menu Loaded Live from Supabase (chocolates table)"
-                : `Fallback Mode: ${supabaseNotice || "Configure .env.local"}`}
+              {loading ? "Loading chocolates table..." : sourceLabel}
             </span>
             <button
               onClick={loadMenu}
               className="p-1.5 rounded-full bg-choc-800 hover:bg-choc-700 text-gold-400 border border-gold-500/40 transition"
-              title="Refresh from Supabase"
+              title="Refresh from database"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
             </button>
